@@ -61,6 +61,10 @@ npm run mock -- 8   # 创建模拟 RD6006（8 Ω 负载），打印伪终端路�
 
 在「添加设备」中手动填入打印出的路径（例如 `/dev/pts/3`）。可以同时运行多个模拟器测试多设备。模拟器只支持 Linux 和 macOS。
 
+## 与 AI agent 共用设备
+
+RIDEN-Core 附带 MCP server [riden-mcp](https://github.com/riden-tools/RIDEN-Core/tree/main/mcp)，Claude Code、Codex 等 agent 可以通过它读取和控制电源。要让 Desktop 和 agent 同时使用同一台设备，先单独运行 `riden-cored`，再在「添加设备」中选择连接已在运行的 Core 服务。一个串口只能由一个 `riden-cored` 打开。
+
 ## 目录结构
 
 | 路径 | 说明 |
