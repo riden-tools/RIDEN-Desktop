@@ -1,6 +1,6 @@
 # RIDEN Desktop
 
-RIDEN 可调电源（RD6006 / RD6006P / RD6012 / RD6018 / RD6024 / RD6030 / RK8009）的桌面上位机，基于 Electron + Vue，支持 Linux 和 Windows。设备通信由 [RIDEN-Core](https://github.com/beilusm/RIDEN-Core) 负责，作为 git 子模块放在 `core/`。
+RIDEN 可调电源（RD6006 / RD6006P / RD6012 / RD6018 / RD6024 / RD6030 / RK8009）的桌面上位机，基于 Electron + Vue，支持 Linux 和 Windows。设备通信由 [RIDEN-Core](https://github.com/riden-tools/RIDEN-Core) 负责，作为 git 子模块放在 `core/`。
 
 ## 功能
 
@@ -14,7 +14,7 @@ RIDEN 可调电源（RD6006 / RD6006P / RD6012 / RD6018 / RD6024 / RD6030 / RK80
 ## 获取源码
 
 ```bash
-git clone --recurse-submodules https://github.com/beilusm/RIDEN-Desktop.git
+git clone --recurse-submodules https://github.com/riden-tools/RIDEN-Desktop.git
 cd RIDEN-Desktop
 ```
 
