@@ -14,6 +14,10 @@
       <span class="count">{{ onlineCount }}/{{ store.devices.length }}</span>
     </button>
 
+    <button class="nav" :class="{ active: store.selected === 'programs' }" @click="store.selected = 'programs'">
+      <Workflow /><span>编程输出</span><span v-if="running" class="badge on">{{ running }} 运行中</span>
+    </button>
+
     <div class="section-head">
       <span>设备</span>
       <button class="btn ghost sm icon" title="添加设备" @click="$emit('add')"><Plus /></button>
@@ -86,7 +90,7 @@
 
 <script setup>
 import { computed } from 'vue';
-import { LayoutGrid, Plus, ZapOff, Sun, Moon, Palette } from '@lucide/vue';
+import { LayoutGrid, Plus, ZapOff, Sun, Moon, Palette, Workflow } from '@lucide/vue';
 import logo from '../assets/logo.png';
 import { SEEDS } from '../theme.js';
 import { store, setTheme, run, api } from '../store.js';
@@ -95,7 +99,8 @@ import { STATUS, fmt, digits, powerDigits, deviceSubtitle } from '../format.js';
 defineEmits(['add']);
 
 const onlineCount = computed(() => store.devices.filter((d) => d.status === 'online').length);
-const anyOn = computed(() => store.devices.some((d) => d.live?.output && d.writable));
+const running = computed(() => store.programRuns.filter((r) => !r.endedAt).length);
+const anyOn = computed(() => running.value || store.devices.some((d) => d.live?.output && d.writable));
 
 function allOff() {
   run(() => api.allOutputOff(), '已关闭所有输出');

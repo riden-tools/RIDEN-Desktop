@@ -14,6 +14,7 @@ export const store = reactive({
   colors: {},
   toasts: [],
   appInfo: null,
+  programRuns: [],
 });
 
 const histories = new Map();
@@ -96,13 +97,28 @@ export async function init() {
   setTheme(store.theme);
   api.onState(upsert);
   api.onSample(onSample);
+  api.onProgram(upsertRun);
+  // Subscribe first; a run update can arrive while the initial list is loading.
+  for (const r of await api.programRuns()) if (!store.programRuns.some((x) => x.id === r.id)) upsertRun(r);
   store.appInfo = await api.appInfo();
   for (const s of await api.listDevices()) upsert(s);
   if (store.devices.length === 1) store.selected = store.devices[0].id;
 }
 
+export function upsertRun(state) {
+  const r = store.programRuns.find((x) => x.id === state.id);
+  if (r) Object.assign(r, state);
+  else store.programRuns.unshift(state);
+  store.programRuns = store.programRuns.slice(0, 40);
+}
+
+export function deviceProgram(id) {
+  return store.programRuns.find((r) => !r.endedAt && Object.values(r.bindings).includes(id));
+}
+
 export async function removeDevice(id) {
-  await run(() => api.removeDevice(id), '设备已移除');
+  const removed = await run(() => api.removeDevice(id), '设备已移除');
+  if (!removed) return;
   const k = store.devices.findIndex((d) => d.id === id);
   if (k >= 0) store.devices.splice(k, 1);
   histories.delete(id);

@@ -4,9 +4,14 @@
 用法: python3 scripts/mock-device.py [负载电阻Ω，默认 8]
 在“添加设备”里手动填入打印出的路径即可连接。
 """
-import os, pty, random, select, struct, sys, time, tty
+import argparse, os, pty, random, select, struct, time, tty
 
-LOAD = float(sys.argv[1]) if len(sys.argv) > 1 else 8.0
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument('load', nargs='?', type=float, default=8.0)
+parser.add_argument('--battery', type=float, help='模拟电池的初始电压（HR33）')
+parser.add_argument('--taper-seconds', type=float, default=2.0, help='模拟充电后多久进入 0.05 A 恒压阶段')
+args = parser.parse_args()
+LOAD = args.load
 
 
 def crc(data):
@@ -21,11 +26,14 @@ def crc(data):
 reg = [0] * 121
 reg[0], reg[1], reg[2], reg[3] = 60067, 0, 4242, 115
 reg[5], reg[8], reg[9], reg[14], reg[18], reg[72] = 32, 500, 2000, 2400, 0, 3
+if args.battery is not None:
+    reg[32], reg[33] = 1, round(args.battery * 100)
 for k in range(10):
     reg[80 + k * 4: 84 + k * 4] = [500 + k * 100, 2000, 6200, 6200]
 
 
 live_protection = reg[82:84].copy()
+output_started = None
 
 def update():
     v_set, i_set = reg[8] / 100, reg[9] / 1000
@@ -33,10 +41,16 @@ def update():
         v = i = 0.0
         cc = 0
     else:
-        i = v_set / LOAD
-        cc = int(i > i_set)
-        i = min(i, i_set)
-        v = i * LOAD if cc else v_set
+        if args.battery is not None:
+            cc = int(time.monotonic() - (output_started or time.monotonic()) < args.taper_seconds)
+            i = i_set if cc else min(0.05, i_set)
+            v = args.battery if cc else v_set
+            reg[33] = round(v * 100)
+        else:
+            i = v_set / LOAD
+            cc = int(i > i_set)
+            i = min(i, i_set)
+            v = i * LOAD if cc else v_set
         v += random.uniform(-0.004, 0.004)
         i = max(0.0, i + random.uniform(-0.0015, 0.0015))
     if reg[18] and (v * 100 > live_protection[0] or i * 1000 > live_protection[1]):
@@ -50,6 +64,7 @@ def update():
 
 
 def write_register(address, value):
+    global output_started
     if address == 15:  # 与真机一致：通信期间面板保持锁定
         return
     reg[address] = value
@@ -60,6 +75,7 @@ def write_register(address, value):
         live_protection[address - 82] = value
     elif address == 18 and value == 1:
         reg[16] = 0
+        output_started = time.monotonic()
 
 
 master, slave = pty.openpty()

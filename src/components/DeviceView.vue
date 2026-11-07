@@ -25,8 +25,8 @@
           <span class="chip"><Thermometer />{{ device.live.temp ?? '--' }} °C</span>
           <span class="chip"><Plug />输入 {{ fmt(device.live.vin, 2) }} V</span>
         </div>
-        <button class="btn ghost sm icon" title="重新连接" @click="run(() => api.reconnect(device.id))"><RefreshCw /></button>
-        <button class="btn ghost sm icon" title="移除设备" @click="removing = true"><Trash2 /></button>
+        <button class="btn ghost sm icon" title="重新连接" :disabled="!!program" @click="run(() => api.reconnect(device.id))"><RefreshCw /></button>
+        <button class="btn ghost sm icon" title="移除设备" :disabled="!!program" @click="removing = true"><Trash2 /></button>
       </div>
     </header>
 
@@ -43,7 +43,7 @@
     <div v-if="device.live?.protect" class="banner err">
       <ShieldAlert />
       <span>
-        <b>{{ device.live.protect === 'OVP' ? '过压保护 OVP' : '过流保护 OCP' }}</b> 已触发，设备已切断输出。排除故障后重新打开输出。
+        <b>{{ ({ OVP: '过压保护 OVP', OCP: '过流保护 OCP', OTP: '过温保护 OTP' })[device.live.protect] }}</b> 已触发，设备已切断输出。排除故障后重新打开输出。
       </span>
     </div>
     <div v-if="profileMismatch" class="banner warn">
@@ -88,6 +88,7 @@
         <LiveChart :device="device" />
       </div>
       <div class="right">
+        <div v-if="program" class="banner info"><Workflow /><span>「{{ program.name }}」正在控制此设备</span><button class="btn sm" @click="store.selected = 'programs'">查看程序</button></div>
         <ControlPanel :device="device" :can-write="canWrite" />
         <PresetPanel :device="device" :can-write="canWrite" />
         <DeviceSettings :device="device" :can-write="canWrite" />
@@ -111,7 +112,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
 import {
   Pencil, Lock, Eye, Thermometer, Plug, RefreshCw, Trash2, CircleAlert, TriangleAlert, ShieldAlert, Info,
-  Zap, Activity, Gauge, BatteryCharging, RotateCcw, SlidersHorizontal,
+  Zap, Activity, Gauge, BatteryCharging, RotateCcw, SlidersHorizontal, Workflow,
 } from '@lucide/vue';
 import ModelProfileDialog from './ModelProfileDialog.vue';
 import Meter from './Meter.vue';
@@ -120,7 +121,7 @@ import ControlPanel from './ControlPanel.vue';
 import PresetPanel from './PresetPanel.vue';
 import DeviceSettings from './DeviceSettings.vue';
 import Modal from './Modal.vue';
-import { api, run, removeDevice } from '../store.js';
+import { api, run, removeDevice, store, deviceProgram } from '../store.js';
 import { STATUS, fmt, digits, powerDigits, duration } from '../format.js';
 
 const props = defineProps({ device: { type: Object, required: true } });
@@ -136,7 +137,8 @@ const load = computed(() => {
   const r = live.value.v / live.value.i;
   return r >= 100 ? r.toFixed(0) : r >= 10 ? r.toFixed(1) : r.toFixed(2);
 });
-const canWrite = computed(() => props.device.writable && props.device.status === 'online');
+const program = computed(() => deviceProgram(props.device.id));
+const canWrite = computed(() => props.device.writable && props.device.status === 'online' && !program.value);
 const statusBadge = computed(() => ({ ok: 'on', warn: '', err: 'err' })[STATUS[props.device.status]?.cls] ?? '');
 
 const readonlyReason = computed(() => {

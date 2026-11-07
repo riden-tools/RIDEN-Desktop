@@ -330,3 +330,10 @@ body {
 .power {
   color: var(--power);
 }
+
+/* Blockly puts these editors on body; keep them below application modals (50). */
+.blocklyWidgetDiv,
+.blocklyDropDownDiv,
+.blocklyTooltipDiv {
+  z-index: 30 !important;
+}

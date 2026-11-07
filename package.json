@@ -1,7 +1,7 @@
 {
   "name": "riden-desktop",
   "productName": "RIDEN Desktop",
-  "version": "0.1.0",
+  "version": "0.2.1",
   "description": "RIDEN 可调电源上位机",
   "main": "electron/main.cjs",
   "private": true,
@@ -9,12 +9,13 @@
     "dev": "node scripts/dev.mjs",
     "build": "vite build",
     "test": "node --test tests/*.test.cjs",
-    "core:linux": "cmake -S core -B core/build -DCMAKE_BUILD_TYPE=Release && cmake --build core/build && cmake --install core/build --prefix core/dist/linux",
-    "core:win": "cmake -S core -B core/build-windows -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE=cmake/mingw-w64-x86_64.cmake && cmake --build core/build-windows && cmake --install core/build-windows --prefix core/dist/windows",
+    "core:linux": "cmake -S core -B core/build -DCMAKE_BUILD_TYPE=Release && cmake --build core/build --parallel && cmake --install core/build --prefix core/dist/linux",
+    "core:win": "cmake -S core -B core/build-windows -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE=cmake/mingw-w64-x86_64.cmake && cmake --build core/build-windows --parallel && cmake --install core/build-windows --prefix core/dist/windows",
     "start": "vite build && electron .",
-    "dist:linux": "vite build && electron-builder --linux",
-    "dist:win": "vite build && electron-builder --win",
-    "mock": "python3 scripts/mock-device.py"
+    "dist:linux": "npm run core:linux && vite build && electron-builder --linux pacman --x64 --publish never && node scripts/checksums.mjs",
+    "dist:win": "npm run core:win && vite build && electron-builder --win nsis --x64 --publish never && node scripts/checksums.mjs",
+    "mock": "python3 scripts/mock-device.py",
+    "dist": "npm run dist:linux && npm run dist:win"
   },
   "build": {
     "appId": "io.riden.desktop",
@@ -25,12 +26,14 @@
     "files": [
       "dist/**",
       "electron/**",
-      "package.json"
+      "shared/**",
+      "package.json",
+      "LICENSE",
+      "docs/*.md"
     ],
     "linux": {
       "target": [
-        "AppImage",
-        "deb"
+        "pacman"
       ],
       "category": "Utility",
       "extraResources": [
@@ -42,7 +45,20 @@
             "lib/**"
           ]
         }
-      ]
+      ],
+      "executableName": "riden-desktop",
+      "icon": "build/icons",
+      "syncDesktopName": true,
+      "maintainer": "RIDEN Tools <riden-tools@users.noreply.github.com>",
+      "desktop": {
+        "entry": {
+          "Name[zh_CN]": "RIDEN 电源控制台",
+          "Comment[zh_CN]": "多设备电源控制、实时曲线与积木编程",
+          "Keywords": "RIDEN;RD6006;power;supply;Blockly;",
+          "StartupNotify": "true",
+          "Icon": "/usr/share/icons/hicolor/512x512/apps/riden-desktop.png"
+        }
+      }
     },
     "win": {
       "target": [
@@ -57,11 +73,73 @@
             "bin/*.dll"
           ]
         }
-      ]
+      ],
+      "icon": "build/icon.ico",
+      "signAndEditExecutable": true
     },
     "nsis": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "RIDEN-Desktop-${version}-windows-${arch}-setup.${ext}",
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "installerSidebar": "build/installerSidebar.bmp",
+      "uninstallerSidebar": "build/installerSidebar.bmp",
+      "installerHeader": "build/installerHeader.bmp",
+      "include": "build/installer.nsh",
+      "installerLanguages": [
+        "zh_CN",
+        "en_US"
+      ],
+      "displayLanguageSelector": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "RIDEN Desktop",
+      "deleteAppDataOnUninstall": false,
+      "runAfterFinish": true,
+      "license": "LICENSE"
+    },
+    "copyright": "Copyright © 2026 RIDEN Tools contributors",
+    "compression": "maximum",
+    "pacman": {
+      "artifactName": "riden-desktop-${version}-1-x86_64.pkg.tar.zst",
+      "compression": "zstd",
+      "depends": [
+        "alsa-lib",
+        "at-spi2-core",
+        "cairo",
+        "dbus",
+        "expat",
+        "gcc-libs",
+        "glib2",
+        "glibc",
+        "gtk3",
+        "libcups",
+        "libdrm",
+        "libx11",
+        "libxcb",
+        "libxcomposite",
+        "libxdamage",
+        "libxext",
+        "libxfixes",
+        "libxkbcommon",
+        "libxrandr",
+        "mesa",
+        "nspr",
+        "nss",
+        "pango",
+        "systemd-libs",
+        "xdg-utils"
+      ],
+      "fpm": [
+        "--iteration",
+        "1",
+        "--description",
+        "RIDEN power supply control, live charts and block programming",
+        "--after-upgrade",
+        "build/linux-after-install.sh"
+      ],
+      "afterInstall": "build/linux-after-install.sh"
     }
   },
   "devDependencies": {
@@ -69,6 +147,7 @@
     "@lucide/vue": "^1.66.0",
     "@material/material-color-utilities": "^0.4.0",
     "@vitejs/plugin-vue": "^6.0.10",
+    "blockly": "^13.4.0",
     "echarts": "^6.1.0",
     "electron": "^45.2.1",
     "electron-builder": "^26.18.0",
@@ -79,5 +158,11 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/riden-tools/RIDEN-Desktop.git"
+  },
+  "desktopName": "io.riden.desktop.desktop",
+  "homepage": "https://github.com/riden-tools/RIDEN-Desktop",
+  "author": {
+    "name": "RIDEN Tools",
+    "email": "riden-tools@users.noreply.github.com"
   }
 }

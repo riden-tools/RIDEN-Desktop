@@ -6,11 +6,13 @@
         <TriangleAlert />
         未找到 riden-cored，串口设备无法连接。请先运行 npm run core:linux（Windows 为 core:win）构建 RIDEN-Core，或设置环境变量 RIDEN_CORED 指向可执行文件。
       </div>
-      <DeviceView v-if="current" :key="current.id" :device="current" />
+      <ProgramView v-if="store.selected === 'programs'" />
+      <DeviceView v-else-if="current" :key="current.id" :device="current" />
       <Overview v-else @add="adding = true" />
     </main>
     <AddDeviceDialog v-if="adding" @close="adding = false" />
     <Toasts />
+    <BatteryConfirmation />
   </div>
 </template>
 
@@ -23,6 +25,8 @@ import Overview from './components/Overview.vue';
 import DeviceView from './components/DeviceView.vue';
 import AddDeviceDialog from './components/AddDeviceDialog.vue';
 import Toasts from './components/Toasts.vue';
+import ProgramView from './components/program/ProgramView.vue';
+import BatteryConfirmation from './components/program/BatteryConfirmation.vue';
 
 const adding = ref(false);
 const current = computed(() => (store.selected === 'overview' ? null : deviceById(store.selected)));

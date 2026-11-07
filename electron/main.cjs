@@ -6,10 +6,22 @@ const { app, BrowserWindow, ipcMain, dialog, shell, Menu, nativeTheme } = requir
 const { Device } = require('./device.cjs');
 const { listPorts } = require('./ports.cjs');
 const { resolveCore } = require('./core-path.cjs');
+const { ProgramManager, validateProgram } = require('./program-engine.cjs');
+const { ProgramLibrary } = require('./program-library.cjs');
+const { block, emptyProgram, chargingProgram, sweepProgram, trackingProgram } = require('./program-schema.cjs');
+
+// Match the identity used by the installer and desktop entry, including Wayland.
+app.setName('RIDEN Desktop');
+if (process.platform === 'win32') app.setAppUserModelId('io.riden.desktop');
+if (process.platform === 'linux') app.setDesktopName('io.riden.desktop.desktop');
 
 const BAUDS = [9600, 19200, 38400, 57600, 115200];
 const PERIODS = [0, 100, 200, 500, 1000];
 const devices = new Map();
+const programs = new ProgramManager(devices);
+programs.on('update', (s) => send('program:update', s));
+let library = null;
+let libraryError = '';
 let win = null;
 let corePath = null;
 let quitting = false;
@@ -98,6 +110,16 @@ function getDevice(id) {
   return d;
 }
 
+function manualDevice(id) {
+  programs.assertFree(id);
+  return getDevice(id);
+}
+
+function getLibrary() {
+  if (!library) throw new Error(libraryError || '程序库未初始化');
+  return library;
+}
+
 function handle(channel, fn) {
   ipcMain.handle(channel, async (_e, ...args) => {
     try {
@@ -120,7 +142,7 @@ handle('device:add', (input) => {
   return d.state();
 });
 handle('device:remove', async (id) => {
-  const d = getDevice(id);
+  const d = manualDevice(id);
   devices.delete(id);
   saveConfig();
   await d.stop();
@@ -131,30 +153,74 @@ handle('device:rename', (id, name) => {
   getDevice(id).rename(n);
   saveConfig();
 });
-handle('device:reconnect', (id) => getDevice(id).reconnect());
+handle('device:reconnect', (id) => manualDevice(id).reconnect());
 handle('device:setModelProfile', (id, profile) => {
-  const d = getDevice(id);
+  const d = manualDevice(id);
   if (d.config.kind !== 'serial') throw new Error('外部核心服务需自行以 --model-profile 启动');
   d.config.modelProfile = validateProfile(profile);
   saveConfig();
   d.reconnect();
 });
-handle('device:setVoltage', (id, v) => getDevice(id).setVoltage(v));
-handle('device:setCurrent', (id, i) => getDevice(id).setCurrent(i));
-handle('device:setOutput', (id, on) => getDevice(id).setOutput(!!on));
+handle('device:setVoltage', (id, v) => manualDevice(id).setVoltage(v));
+handle('device:setCurrent', (id, i) => manualDevice(id).setCurrent(i));
+handle('device:setOutput', async (id, on) => {
+  if (!on && programs.owner(id)) await programs.stop(programs.owner(id));
+  return manualDevice(id).setOutput(!!on);
+});
 handle('device:setLock', (id, on) => getDevice(id).setLock(!!on));
 handle('device:setBacklight', (id, level) => getDevice(id).setBacklight(level));
-handle('device:setProtection', (id, ovp, ocp) => getDevice(id).setProtection(ovp, ocp));
-handle('device:savePreset', (id, slot, v, i, ovp, ocp) => getDevice(id).savePreset(slot, v, i, ovp, ocp));
-handle('device:recallPreset', (id, slot) => getDevice(id).recallPreset(slot));
-handle('device:resetStats', (id) => getDevice(id).resetStats());
+handle('device:setProtection', (id, ovp, ocp) => manualDevice(id).setProtection(ovp, ocp));
+handle('device:savePreset', (id, slot, v, i, ovp, ocp) => manualDevice(id).savePreset(slot, v, i, ovp, ocp));
+handle('device:recallPreset', (id, slot) => manualDevice(id).recallPreset(slot));
+handle('device:resetStats', (id) => manualDevice(id).resetStats());
 handle('all:outputOff', async () => {
+  await programs.stopAll();
   const results = await Promise.allSettled(
-    [...devices.values()].filter((d) => d.info.writable && d.live?.output).map((d) => d.setOutput(false)),
+    [...devices.values()].filter((d) => d.info.writable).map(async (d) => { await d.setOutput(false); await d.verifyOutputOff(); }),
   );
   const failed = results.filter((r) => r.status === 'rejected').length;
   if (failed) throw new Error(`${failed} 台设备关闭失败`);
   return results.length;
+});
+handle('programs:list', () => getLibrary().list());
+handle('programs:new', (example) => {
+  const examples = { charge: chargingProgram, sweep: sweepProgram, tracking: trackingProgram };
+  return (Object.hasOwn(examples, example) ? examples[example] : emptyProgram)();
+});
+handle('programs:block', (type, device) => block(type, device));
+handle('programs:save', (p) => {
+  if (programs.list().some((r) => r.programId === p.id && !r.endedAt)) throw new Error('运行中的程序不能覆盖保存，请先停止');
+  return getLibrary().save(p);
+});
+handle('programs:remove', (id) => {
+  if (programs.list().some((r) => r.programId === id && !r.endedAt)) throw new Error('请先停止程序');
+  getLibrary().remove(id);
+});
+handle('programs:runs', () => programs.list());
+handle('programs:runProgram', (id) => {
+  const r = programs.runs.get(id);
+  if (!r) throw new Error('运行记录不存在');
+  return structuredClone(r.program);
+});
+handle('programs:validate', (p) => { validateProgram(p); return true; });
+handle('programs:start', (p, bindings, params) => programs.start(p, bindings, params));
+handle('programs:stop', (id) => programs.stop(id));
+handle('programs:confirm', (id, request, cells) => programs.confirm(id, request, cells));
+handle('programs:import', async () => {
+  const { canceled, filePaths } = await dialog.showOpenDialog(win, { title: '导入图形程序', filters: [{ name: 'RIDEN 程序', extensions: ['json'] }], properties: ['openFile'] });
+  if (canceled) return null;
+  if ((await fs.promises.stat(filePaths[0])).size > 512000) throw new Error('程序文件过大');
+  const p = JSON.parse(await fs.promises.readFile(filePaths[0], 'utf8'));
+  p.id = crypto.randomUUID(); // Import a copy; never overwrite an existing program.
+  return getLibrary().save(p);
+});
+handle('programs:export', async (input) => {
+  const p = validateProgram(input);
+  const name = p.name.replace(/[^\w一-龥.-]+/g, '_');
+  const { canceled, filePath } = await dialog.showSaveDialog(win, { title: '导出图形程序', defaultPath: `${name}.json`, filters: [{ name: 'RIDEN 程序', extensions: ['json'] }] });
+  if (canceled || !filePath) return null;
+  await fs.promises.writeFile(filePath, JSON.stringify(p, null, 2), 'utf8');
+  return filePath;
 });
 handle('csv:save', async (name, text) => {
   if (typeof text !== 'string' || text.length > 200 * 1024 * 1024) throw new Error('数据无效');
@@ -181,7 +247,7 @@ function createWindow() {
     minHeight: 700,
     title: 'RIDEN Desktop',
     backgroundColor: '#11140f',
-    icon: path.join(__dirname, 'assets', 'icon.png'),
+    icon: path.join(__dirname, 'assets', process.platform === 'win32' ? 'icon.ico' : 'icon.png'),
     autoHideMenuBar: true,
     show: false,
     webPreferences: {
@@ -209,6 +275,8 @@ function createWindow() {
 app.whenReady().then(() => {
   Menu.setApplicationMenu(null);
   corePath = resolveCore(app);
+  try { library = new ProgramLibrary(path.join(app.getPath('userData'), 'programs.json')); }
+  catch (e) { libraryError = `程序库加载失败：${e.message}。原文件已保留，请检查 programs.json`; }
   for (const raw of loadConfig()) {
     try {
       addDevice(validateConfig(raw));
@@ -225,7 +293,7 @@ app.on('before-quit', (e) => {
   if (quitting) return;
   quitting = true;
   e.preventDefault();
-  Promise.allSettled([...devices.values()].map((d) => d.stop())).finally(() => app.quit());
+  programs.stopAll().finally(() => Promise.allSettled([...devices.values()].map((d) => d.stop()))).finally(() => app.quit());
 });
 
 // 信号退出不会触发 before-quit；不处理会留下占用串口的 riden-cored。

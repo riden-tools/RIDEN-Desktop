@@ -274,7 +274,7 @@ class Device extends EventEmitter {
       vin: raw[14] !== null ? raw[14] / 100 : null,
       temp: raw[5] !== null ? (raw[4] ? -raw[5] : raw[5]) : null,
       lock: raw[15] === 1,
-      protect: raw[16] === 1 ? 'OVP' : raw[16] === 2 ? 'OCP' : '',
+      protect: raw[16] === 1 ? 'OVP' : raw[16] === 2 ? 'OCP' : raw[16] === 3 ? 'OTP' : '',
       cc: raw[17] === 1,
       output,
       activeSlot: Number.isInteger(raw[19]) && raw[19] <= 9 ? raw[19] : null,
@@ -365,6 +365,30 @@ class Device extends EventEmitter {
 
   setOutput(on) {
     return this.#write(18, [on ? 1 : 0]);
+  }
+
+  async verifyOutputOff() {
+    if (!this.cmd) throw new Error('设备未连接，无法确认输出关闭');
+    const r = await this.cmd.request({ cmd: 'read', start: 18, count: 1, max_age_ms: 0 });
+    if (!r.ok || r.values[0] !== 0) throw new Error('无法确认设备输出已关闭');
+  }
+
+  async readBattery({ source, requireOutputOff = false } = {}) {
+    if (!this.cmd) throw new Error('设备未连接');
+    const r = await this.cmd.request({ cmd: 'read', start: 32, count: 2, max_age_ms: 0 });
+    if (!r.ok) throw new Error(errorText(r.error));
+    // HR33 can remain zero with a battery connected across the output terminals,
+    // even while HR10 correctly measures its voltage. Never use an energized
+    // output as a fallback battery measurement. Read HR18 in the same fresh span.
+    const useTerminals = source === 'HR10' || (!source && r.values[1] === 0);
+    let terminal;
+    if (useTerminals || requireOutputOff) {
+      terminal = await this.cmd.request({ cmd: 'read', start: 10, count: 9, max_age_ms: 0 });
+      if (!terminal.ok) throw new Error(errorText(terminal.error));
+      if (terminal.values[8] !== 0 && (requireOutputOff || source === 'HR10')) throw new Error('读取电池端电压前请先关闭输出');
+    }
+    const fallback = useTerminals && terminal.values[8] === 0;
+    return { mode: r.values[0], voltage: (fallback ? terminal.values[0] : r.values[1]) / this.info.vScale, source: fallback ? 'HR10' : 'HR33' };
   }
 
   // 部分固件在串口通信期间强制锁定面板：写入被确认但回读不变。
