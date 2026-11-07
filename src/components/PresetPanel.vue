@@ -1,6 +1,6 @@
 <template>
   <section class="panel presets">
-    <div class="panel-title"><Bookmark />预设 M1–M9</div>
+    <div class="panel-title"><Bookmark />数据组 M1–M9</div>
     <div v-if="slots.length" class="grid">
       <div
         v-for="s in slots"
@@ -8,13 +8,15 @@
         class="slot"
         :class="{ match: s.match, disabled: !canWrite }"
         role="button"
-        :title="canWrite ? `调用 M${s.n}` : ''"
+        :title="canWrite ? `切换到 M${s.n}` : ''"
         @click="recall(s.n)"
       >
         <span class="slot-n">M{{ s.n }}</span>
         <span class="mono volt">{{ fmt(s.v, vd) }}<small>V</small></span>
         <span class="mono curr">{{ fmt(s.i, id) }}<small>A</small></span>
-        <button v-if="canWrite" class="save" title="用当前设定覆盖此预设" @click.stop="saving = s.n"><Save /></button>
+        <span class="protection mono">OVP {{ fmt(s.ovp, vd) }}<small>V</small></span>
+        <span class="protection mono">OCP {{ fmt(s.ocp, id) }}<small>A</small></span>
+        <button v-if="canWrite" class="save" title="用当前电压、电流和 OVP/OCP 覆盖此预设" @click.stop="saving = s.n"><Save /></button>
       </div>
     </div>
     <div v-else class="faint loading">读取预设中…</div>
@@ -23,7 +25,9 @@
       <p class="muted">
         将 M{{ saving }} 改为当前设定
         <b class="mono volt">{{ fmt(device.live?.setV, vd) }} V</b> /
-        <b class="mono curr">{{ fmt(device.live?.setI, id) }} A</b>？原有数值会被覆盖。
+        <b class="mono curr">{{ fmt(device.live?.setI, id) }} A</b>，
+        OVP <b class="mono">{{ fmt(currentProtection?.ovp, vd) }} V</b> /
+        OCP <b class="mono">{{ fmt(currentProtection?.ocp, id) }} A</b>？原有四项数值会被覆盖。
       </p>
       <template #footer>
         <button class="btn" @click="saving = 0">取消</button>
@@ -44,28 +48,30 @@ const props = defineProps({ device: { type: Object, required: true }, canWrite: 
 const saving = ref(0);
 const vd = computed(() => digits(props.device.vScale));
 const id = computed(() => digits(props.device.iScale));
+const currentProtection = computed(() => props.device.protection);
 const slots = computed(() => {
   const list = props.device.presets || [];
   const live = props.device.live;
   return list.slice(1, 10).map((p, k) => ({
     n: k + 1,
     ...p,
-    match: !!live && Math.abs(p.v - live.setV) < 1e-6 && Math.abs(p.i - live.setI) < 1e-6,
+    match: live?.activeSlot === k + 1,
   }));
 });
 
 function recall(n) {
   if (!props.canWrite) return;
   const p = slots.value[n - 1];
-  run(() => api.recallPreset(props.device.id, n), `已调用 M${n}：${fmt(p.v, vd.value)} V / ${fmt(p.i, id.value)} A`);
+  run(() => api.recallPreset(props.device.id, n), `已切换到 M${n}：${fmt(p.v, vd.value)} V / ${fmt(p.i, id.value)} A`);
 }
 
 async function save() {
   const n = saving.value;
   saving.value = 0;
   const live = props.device.live;
-  if (!live) return;
-  await run(() => api.savePreset(props.device.id, n, live.setV, live.setI), `M${n} 已保存`);
+  const protection = currentProtection.value;
+  if (!live || !protection || !props.canWrite) return;
+  await run(() => api.savePreset(props.device.id, n, live.setV, live.setI, protection.ovp, protection.ocp), `M${n} 电压、电流及 OVP/OCP 已保存`);
 }
 </script>
 
@@ -110,6 +116,10 @@ async function save() {
 }
 .slot.match .slot-n {
   color: var(--primary);
+}
+.protection {
+  color: var(--text-2);
+  font-size: 11px;
 }
 .slot small {
   font-size: 10px;

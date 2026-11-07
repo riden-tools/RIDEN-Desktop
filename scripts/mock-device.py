@@ -25,6 +25,8 @@ for k in range(10):
     reg[80 + k * 4: 84 + k * 4] = [500 + k * 100, 2000, 6200, 6200]
 
 
+live_protection = reg[82:84].copy()
+
 def update():
     v_set, i_set = reg[8] / 100, reg[9] / 1000
     if not reg[18]:
@@ -37,10 +39,27 @@ def update():
         v = i * LOAD if cc else v_set
         v += random.uniform(-0.004, 0.004)
         i = max(0.0, i + random.uniform(-0.0015, 0.0015))
+    if reg[18] and (v * 100 > live_protection[0] or i * 1000 > live_protection[1]):
+        reg[16] = 1 if v * 100 > live_protection[0] else 2
+        reg[18] = 0
+        v = i = 0.0
     p = round(v * i * 100)
     reg[10], reg[11] = max(0, round(v * 100)), max(0, round(i * 1000))
     reg[12], reg[13], reg[17] = p >> 16, p & 0xFFFF, cc
     reg[5] = 32 + int(v * i / 4)
+
+
+def write_register(address, value):
+    if address == 15:  # 与真机一致：通信期间面板保持锁定
+        return
+    reg[address] = value
+    if address == 19 and 1 <= value <= 9:
+        reg[8:10] = reg[80 + value * 4:82 + value * 4]
+        live_protection[:] = reg[82 + value * 4:84 + value * 4]
+    elif address in (82, 83):
+        live_protection[address - 82] = value
+    elif address == 18 and value == 1:
+        reg[16] = 0
 
 
 master, slave = pty.openpty()
@@ -66,11 +85,11 @@ while True:
         if fn == 3:
             resp = bytes([addr, 3, value * 2]) + struct.pack(f'>{value}H', *reg[start:start + value])
         elif fn == 6:
-            if start != 15:  # 与真机一致：通信期间面板保持锁定
-                reg[start] = value
+            write_register(start, value)
             resp = req[:6]
         elif fn == 16:
-            reg[start:start + value] = struct.unpack(f'>{value}H', req[7:-2])
+            for field, raw in enumerate(struct.unpack(f'>{value}H', req[7:-2])):
+                write_register(start + field, raw)
             resp = req[:6]
         else:
             resp = bytes([addr, fn | 0x80, 1])

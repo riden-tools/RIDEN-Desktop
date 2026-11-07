@@ -1,24 +1,7 @@
 <template>
   <section class="panel settings">
-    <div class="panel-title"><ShieldCheck />保护与设置</div>
+    <div class="panel-title"><Settings />设备设置</div>
 
-    <div class="prot">
-      <label class="field">
-        <span>过压保护 OVP</span>
-        <div class="unit-input">
-          <input v-model="ovp" class="input mono" :disabled="!canWrite" @input="dirty = true" @keydown.enter="applyProt" />
-          <em>V</em>
-        </div>
-      </label>
-      <label class="field">
-        <span>过流保护 OCP</span>
-        <div class="unit-input">
-          <input v-model="ocp" class="input mono" :disabled="!canWrite" @input="dirty = true" @keydown.enter="applyProt" />
-          <em>A</em>
-        </div>
-      </label>
-      <button class="btn" :class="{ primary: dirty }" :disabled="!canWrite || !dirty" @click="applyProt">应用</button>
-    </div>
 
     <div class="row">
       <div>
@@ -62,72 +45,21 @@
 </template>
 
 <script setup>
-import { computed, ref, watch } from 'vue';
-import { ShieldCheck, Lock, SunDim } from '@lucide/vue';
-import { api, run, toast } from '../store.js';
-import { digits, fmt, deviceSubtitle } from '../format.js';
+import { computed } from 'vue';
+import { Settings, Lock, SunDim } from '@lucide/vue';
+import { api, run } from '../store.js';
+import { deviceSubtitle } from '../format.js';
 
 const props = defineProps({ device: { type: Object, required: true }, canWrite: Boolean });
-const vd = computed(() => digits(props.device.vScale));
-const id = computed(() => digits(props.device.iScale));
-const m0 = computed(() => props.device.presets?.[0]);
-const ovp = ref('');
-const ocp = ref('');
-const dirty = ref(false);
-
 const link = computed(() => {
   const c = props.device.config;
   return c.kind === 'remote' ? deviceSubtitle(props.device) : `${deviceSubtitle(props.device)} @ ${c.baud}`;
 });
-
-watch(
-  m0,
-  (p) => {
-    if (!p || dirty.value) return;
-    ovp.value = fmt(p.ovp, vd.value);
-    ocp.value = fmt(p.ocp, id.value);
-  },
-  { immediate: true },
-);
-
-async function applyProt() {
-  const v = Number(ovp.value);
-  const i = Number(ocp.value);
-  if (!Number.isFinite(v) || !Number.isFinite(i) || v <= 0 || i <= 0) {
-    toast('请输入有效的保护值', 'error');
-    return;
-  }
-  const ok = await run(() => api.setProtection(props.device.id, v, i), '保护值已更新');
-  if (ok) dirty.value = false;
-}
 </script>
 
 <style scoped>
 .settings {
   padding: 16px 18px 6px;
-}
-.prot {
-  display: grid;
-  grid-template-columns: 1fr 1fr auto;
-  align-items: end;
-  gap: 10px;
-  margin: 14px 0 6px;
-}
-.unit-input {
-  position: relative;
-}
-.unit-input .input {
-  width: 100%;
-  padding-right: 28px;
-}
-.unit-input em {
-  position: absolute;
-  right: 10px;
-  top: 50%;
-  transform: translateY(-50%);
-  font-style: normal;
-  font-size: 12px;
-  color: var(--text-3);
 }
 .row {
   display: flex;
@@ -136,9 +68,6 @@ async function applyProt() {
   gap: 12px;
   padding: 12px 0;
   border-top: 1px solid var(--border);
-}
-.prot + .row {
-  margin-top: 10px;
 }
 .row-label {
   display: flex;

@@ -28,7 +28,7 @@ contextBridge.exposeInMainWorld('riden', {
   setLock: (id, on) => call('device:setLock', id, on),
   setBacklight: (id, level) => call('device:setBacklight', id, level),
   setProtection: (id, ovp, ocp) => call('device:setProtection', id, ovp, ocp),
-  savePreset: (id, slot, v, i) => call('device:savePreset', id, slot, v, i),
+  savePreset: (id, slot, v, i, ovp, ocp) => call('device:savePreset', id, slot, v, i, ovp, ocp),
   recallPreset: (id, slot) => call('device:recallPreset', id, slot),
   resetStats: (id) => call('device:resetStats', id),
   allOutputOff: () => call('all:outputOff'),

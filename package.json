@@ -8,6 +8,7 @@
   "scripts": {
     "dev": "node scripts/dev.mjs",
     "build": "vite build",
+    "test": "node --test tests/*.test.cjs",
     "core:linux": "cmake -S core -B core/build -DCMAKE_BUILD_TYPE=Release && cmake --build core/build && cmake --install core/build --prefix core/dist/linux",
     "core:win": "cmake -S core -B core/build-windows -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE=cmake/mingw-w64-x86_64.cmake && cmake --build core/build-windows && cmake --install core/build-windows --prefix core/dist/windows",
     "start": "vite build && electron .",

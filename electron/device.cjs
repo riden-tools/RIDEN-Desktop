@@ -84,6 +84,7 @@ class Device extends EventEmitter {
       backlightWritable: false,
       backlight: null,
       presets: [],
+      protection: null,
       known: false,
       custom: false,
       daemonPort: config.kind === 'remote' ? config.port : 0,
@@ -119,6 +120,7 @@ class Device extends EventEmitter {
       this.lastSampleAt = 0;
       this.connectedAt = Date.now();
       this.info.model = 0;
+      this.info.protection = null;
       this.raw.fill(null);
       this.sub.on('message', (m) => m.type === 'snapshot' && this.#onSample(m));
       const lost = () => this.#lost('与核心服务的连接已断开');
@@ -275,6 +277,7 @@ class Device extends EventEmitter {
       protect: raw[16] === 1 ? 'OVP' : raw[16] === 2 ? 'OCP' : '',
       cc: raw[17] === 1,
       output,
+      activeSlot: Number.isInteger(raw[19]) && raw[19] <= 9 ? raw[19] : null,
       rate,
     };
     if (this.info.status !== 'online') this.#setInfo({ status: 'online', error: '' });
@@ -316,6 +319,10 @@ class Device extends EventEmitter {
       backlightWritable: !!caps.writes_enabled && reg[72].writable,
     });
     await this.#readPresets();
+    // 固件没有独立的即时保护回读；连接时以当前组的存储值初始化。
+    const slot = this.raw[19];
+    const preset = this.info.presets[slot];
+    if (preset) this.#setInfo({ protection: { ovp: preset.ovp, ocp: preset.ocp } });
     const b = await this.cmd.request({ cmd: 'read', start: 72, count: 1, max_age_ms: 0 });
     if (b.ok) this.#setInfo({ backlight: b.values[0] });
   }
@@ -375,25 +382,52 @@ class Device extends EventEmitter {
   }
 
   async setProtection(ovp, ocp) {
-    await this.#write(82, [this.#toRaw(ovp, this.info.vScale, this.info.ovpMax, 'OVP ')]);
-    await this.#write(83, [this.#toRaw(ocp, this.info.iScale, this.info.ocpMax, 'OCP ')]);
+    const rawOvp = this.#toRaw(ovp, this.info.vScale, this.info.ovpMax, 'OVP ');
+    const rawOcp = this.#toRaw(ocp, this.info.iScale, this.info.ocpMax, 'OCP ');
+    // HR82/83 更新即时保护，也会改变 M0 存储；M1–M9 只在显式保存时修改。
+    await this.#write(82, [rawOvp]);
+    await this.#write(83, [rawOcp]);
     await this.#readPresets();
+    const actual = this.info.presets[0];
+    this.#setInfo({ protection: { ovp: actual.ovp, ocp: actual.ocp } });
+    if (Math.round(actual.ovp * this.info.vScale) !== rawOvp ||
+        Math.round(actual.ocp * this.info.iScale) !== rawOcp) {
+      throw new Error('保护值回读不一致，请重试');
+    }
   }
 
-  async savePreset(slot, v, i) {
+  async savePreset(slot, v, i, ovp, ocp) {
     if (!Number.isInteger(slot) || slot < 1 || slot > 9) throw new Error('预设编号应为 1–9');
+    // 先校验四项参数，避免后续字段无效时已经部分覆盖数据组。
+    const values = [
+      this.#toRaw(v, this.info.vScale, this.info.vMax, '电压'),
+      this.#toRaw(i, this.info.iScale, this.info.iMax, '电流'),
+      this.#toRaw(ovp, this.info.vScale, this.info.ovpMax, 'OVP '),
+      this.#toRaw(ocp, this.info.iScale, this.info.ocpMax, 'OCP '),
+    ];
     const base = 80 + slot * 4;
-    await this.#write(base, [this.#toRaw(v, this.info.vScale, this.info.vMax, '电压')]);
-    await this.#write(base + 1, [this.#toRaw(i, this.info.iScale, this.info.iMax, '电流')]);
+    for (let field = 0; field < values.length; field++) {
+      await this.#write(base + field, [values[field]]);
+    }
     await this.#readPresets();
+    const saved = this.info.presets[slot];
+    const actual = [saved.v * this.info.vScale, saved.i * this.info.iScale,
+      saved.ovp * this.info.vScale, saved.ocp * this.info.iScale];
+    if (actual.some((value, field) => Math.round(value) !== values[field])) {
+      throw new Error('数据组保存回读不一致，请重试');
+    }
   }
 
-  // HR19 在部分固件上写入不会真正载入预设，这里直接写入预设里的 V/I。
   async recallPreset(slot) {
-    const p = this.info.presets[slot];
-    if (!p || slot < 1 || slot > 9) throw new Error('预设不存在');
-    await this.setVoltage(p.v);
-    await this.setCurrent(p.i);
+    if (!Number.isInteger(slot) || slot < 1 || slot > 9) throw new Error('数据组编号应为 1–9');
+    await this.#write(19, [slot]);
+    await sleep(600);
+    const r = await this.cmd.request({ cmd: 'read', start: 8, count: 12, max_age_ms: 0 });
+    if (!r.ok) throw new Error(errorText(r.error));
+    if (r.values[11] !== slot) throw new Error('设备未切换到指定数据组');
+    await this.#readPresets();
+    const preset = this.info.presets[slot];
+    this.#setInfo({ protection: { ovp: preset.ovp, ocp: preset.ocp } });
   }
 
   resetStats() {

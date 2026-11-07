@@ -32,6 +32,7 @@
       :disabled="!canWrite"
       :apply="(i) => api.setCurrent(device.id, i)"
     />
+    <ProtectionSettings :device="device" :can-write="canWrite" />
   </section>
 </template>
 
@@ -39,6 +40,7 @@
 import { computed, ref } from 'vue';
 import { Power } from '@lucide/vue';
 import SetpointInput from './SetpointInput.vue';
+import ProtectionSettings from './ProtectionSettings.vue';
 import { api, run } from '../store.js';
 import { digits, fmt } from '../format.js';
 
